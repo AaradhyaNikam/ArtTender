@@ -37,6 +37,7 @@ app.mount("/js", StaticFiles(directory=os.path.join(FRONTEND_DIR, "js")), name="
 
 # Serve individual HTML pages
 @app.get("/")
+@app.get("/index.html")
 def serve_index():
     return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
