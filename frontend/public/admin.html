@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Artiverse - Admin Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles/main.css?v=2">
+    <style>
+        .tender-card h3 { margin-bottom: 0.5rem; }
+        .tender-meta { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;}
+        .budget { color: var(--success); font-weight: 600; }
+        
+        .candidate-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .candidate-info h4 { margin-bottom: 0.2rem;}
+        .candidate-score { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+    </style>
+</head>
+<body>
+    <div class="admin-layout">
+        <aside class="admin-sidebar">
+            <div class="brand">
+                <h2>Admin<span class="highlight">Panel</span></h2>
+            </div>
+            <nav class="nav-links">
+                <a href="#" class="sidebar-item active" id="nav-tenders" onclick="switchTab('tenders')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+                    Tenders Dashboard
+                </a>
+                <a href="#" class="sidebar-item" id="nav-audit" onclick="switchTab('audit')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    Audit Ledger
+                </a>
+                <a href="#" class="sidebar-item" id="nav-artists" onclick="switchTab('artists')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    Artists & Vendors
+                </a>
+            </nav>
+            <div style="margin-top: auto;">
+                <button class="btn-secondary" style="width: 100%;" onclick="logout()">Logout</button>
+            </div>
+        </aside>
+        
+        <main class="admin-main">
+            <!-- Tenders View -->
+            <div id="view-tenders" class="view-section">
+                <div id="pendingUsersSection" style="display: none; margin-bottom: 2rem;">
+                    <h3 style="color: var(--warning); margin-bottom: 1rem;">Pending Artist Approvals</h3>
+                    <div id="pendingUsersList" class="grid-cards"></div>
+                </div>
+
+                <div id="pendingMilestonesSection" style="display: none; margin-bottom: 2rem;">
+                    <h3 style="color: var(--success); margin-bottom: 1rem;">Milestone Reviews (Proof of Work)</h3>
+                    <div id="pendingMilestonesList" class="grid-cards"></div>
+                </div>
+
+                <div class="flex-between mb-2">
+                    <h3>Open Tenders</h3>
+                    <div style="display: flex; gap: 0.75rem;">
+                        <button class="btn-primary" style="padding: 0.6rem 1.2rem; font-size: 0.85rem;" onclick="openCreateTender()">+ Create Tender</button>
+                    </div>
+                </div>
+                
+                <div id="tendersList" class="grid-cards">
+                    <!-- Tenders will be populated here -->
+                    <p class="text-sm">Loading tenders...</p>
+                </div>
+            </div>
+
+            <!-- Audit View -->
+            <div id="view-audit" class="view-section" style="display: none;">
+                <div class="flex-between mb-2">
+                    <h3>Immutable Audit Ledger</h3>
+                    <button class="btn-secondary" style="padding: 0.6rem 1.2rem; font-size: 0.85rem;" onclick="generatePDF()">Export PDF</button>
+                </div>
+                <div id="auditList" style="display: flex; flex-direction: column; gap: 1rem;">
+                    <p class="text-sm">Loading logs...</p>
+                </div>
+            </div>
+
+            <!-- Artists View -->
+            <div id="view-artists" class="view-section" style="display: none;">
+                <div class="flex-between mb-2">
+                    <h3>Vendor Directory</h3>
+                </div>
+                <div id="artistsList" class="grid-cards">
+                    <p class="text-sm">Loading vendors...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+        <!-- Create Tender Modal -->
+        <div class="modal-overlay" id="createTenderModal">
+            <div class="modal-content">
+                <h3 style="margin-bottom: 1rem;">Create New Tender</h3>
+                <div class="input-group">
+                    <label>Title</label>
+                    <input type="text" id="tTitle" placeholder="e.g. City Hall Mural">
+                </div>
+                <div class="input-group">
+                    <label>Description</label>
+                    <textarea id="tDesc" rows="3" placeholder="Description with keywords..."></textarea>
+                </div>
+                <div class="input-group">
+                    <label>Total Budget ($)</label>
+                    <input type="number" id="tBudget" placeholder="10000">
+                </div>
+                <div class="input-group">
+                    <label>Platform Commission (%)</label>
+                    <input type="number" id="tComm" placeholder="10" value="10">
+                </div>
+                <div class="input-group">
+                    <label>Deadline</label>
+                    <input type="datetime-local" id="tDeadline">
+                </div>
+                <div style="display: flex; gap: 1rem;">
+                    <button class="btn-secondary" style="flex: 1;" onclick="closeCreateTender()">Cancel</button>
+                    <button class="btn-primary" style="flex: 1;" onclick="submitCreateTender()">Create</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Candidate Pool Modal -->
+        <div class="modal-overlay" id="candidateModal">
+            <div class="modal-content">
+                <h3 style="margin-bottom: 1rem;">AI Candidate Pool</h3>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">Ranked by historic QualityScore & Capacity</p>
+                <div id="candidatesList" style="max-height: 50vh; overflow-y: auto; margin-bottom: 1.5rem;"></div>
+                <button class="btn-secondary" style="width: 100%;" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Justification Modal -->
+        <div class="modal-overlay" id="justificationModal">
+            <div class="modal-content">
+                <h3 style="margin-bottom: 1rem; color: var(--warning);">Justification Required</h3>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">You are awarding this contract to an artist who is NOT the top-ranked candidate. Please select a reason for the Audit Ledger.</p>
+                
+                <div class="input-group">
+                    <label>Reason</label>
+                    <select id="justificationReason">
+                        <option value="Top rank over capacity">Top rank over capacity</option>
+                        <option value="Specific equipment required">Specific equipment required</option>
+                        <option value="Faster timeline guaranteed">Faster timeline guaranteed</option>
+                        <option value="Portfolio style matches location better">Portfolio style matches location better</option>
+                    </select>
+                </div>
+                
+                <div style="display: flex; gap: 1rem;">
+                    <button class="btn-secondary" style="flex: 1;" onclick="closeJustification()">Cancel</button>
+                    <button class="btn-primary" style="flex: 1;" onclick="submitAward()">Confirm Award</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api.js?v=3"></script>
+    <script>
+        const user = checkAuth('Admin');
+        let currentTenderId = null;
+        let selectedArtistId = null;
+        let candidatePool = [];
+
+        function switchTab(tab) {
+            document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.view-section').forEach(el => el.style.display = 'none');
+            
+            document.getElementById(`nav-${tab}`).classList.add('active');
+            document.getElementById(`view-${tab}`).style.display = 'block';
+
+            if (tab === 'audit') loadAuditLogs();
+            if (tab === 'artists') loadAllUsers();
+        }
+
+        async function loadAuditLogs() {
+            try {
+                const logs = await apiCall('/api/auditlogs');
+                const container = document.getElementById('auditList');
+                container.innerHTML = '';
+                
+                logs.forEach(log => {
+                    container.innerHTML += `
+                        <div class="card glass-panel" style="border-left: 4px solid var(--warning); margin-bottom: 0;">
+                            <div class="flex-between mb-1">
+                                <strong>${log.ActionTaken} (Tender #${log.TenderID || 'N/A'})</strong>
+                                <span class="text-sm">${new Date(log.Timestamp).toLocaleString()}</span>
+                            </div>
+                            <p class="text-sm">Admin ID: ${log.AdminID}</p>
+                            ${log.Justification ? `<p class="text-sm mt-1" style="color: var(--warning);"><em>Justification: ${log.Justification}</em></p>` : ''}
+                        </div>
+                    `;
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        async function loadAllUsers() {
+            try {
+                const users = await apiCall('/api/admin/users');
+                const container = document.getElementById('artistsList');
+                container.innerHTML = '';
+                
+                users.forEach(u => {
+                    container.innerHTML += `
+                        <div class="card glass-panel">
+                            <div class="flex-between mb-1">
+                                <h4>${u.Name}</h4>
+                                <span class="pill ${u.Role === 'Admin' ? 'yellow' : 'blue'}">${u.Role}</span>
+                            </div>
+                            <p class="text-sm">${u.Email}</p>
+                            ${u.Role === 'Artist' ? `
+                                <div class="flex-between mt-2 pt-1" style="border-top: 1px solid var(--border-color);">
+                                    <span class="text-sm">Score: <strong style="color:var(--success);">${u.QualityScore}</strong></span>
+                                    <span class="pill" style="font-size:0.6rem;">${u.CapacityTag}</span>
+                                </div>
+                                <p class="text-sm mt-1"><em>${u.ArtStyleTags || 'No tags'}</em></p>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        async function loadTenders() {
+            try {
+                const tenders = await apiCall('/api/tenders');
+                const container = document.getElementById('tendersList');
+                container.innerHTML = '';
+                
+                tenders.forEach(t => {
+                    container.innerHTML += `
+                        <div class="card tender-card glass-panel" onclick="openCandidatePool(${t.TenderID})" style="cursor: pointer;">
+                            <div class="flex-between mb-1">
+                                <h4>${t.Title}</h4>
+                                <span class="pill ${t.Status === 'Open' ? 'green' : 'yellow'}">${t.Status}</span>
+                            </div>
+                            <div class="flex-between text-sm mb-1">
+                                <span>Budget: <strong style="color: var(--success);">$${t.TotalBudget}</strong></span>
+                                <span>Deadline: ${new Date(t.Deadline).toLocaleString([], {year: 'numeric', month: 'short', day: 'numeric'})}</span>
+                            </div>
+                            <p class="text-sm">${t.Description}</p>
+                        </div>
+                    `;
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function openCandidatePool(tenderId) {
+            currentTenderId = tenderId;
+            try {
+                candidatePool = await apiCall(`/api/tenders/${tenderId}/candidates`);
+                const container = document.getElementById('candidatesList');
+                container.innerHTML = '';
+                
+                if (candidatePool.length === 0) {
+                    container.innerHTML = '<p style="font-size: 0.9rem; color: var(--text-secondary);">No artists have applied for this tender yet.</p>';
+                } else {
+                    candidatePool.forEach((c, index) => {
+                        container.innerHTML += `
+                            <div class="candidate-item">
+                                <div class="candidate-info">
+                                    <h4>#${index + 1} ${c.Name} <span class="pill blue" style="font-size: 0.6rem;">${c.CapacityTag}</span></h4>
+                                    <p style="font-size: 0.75rem; color: var(--text-secondary);">${c.ArtStyleTags}</p>
+                                </div>
+                                <div style="text-align: right;">
+                                    <div class="candidate-score">${c.QualityScore}</div>
+                                    <button class="btn-primary" style="padding: 0.3rem 0.6rem; font-size: 0.7rem;" onclick="triggerAward(${c.UserID}, ${index})">Award</button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+                document.getElementById('candidateModal').classList.add('active');
+            } catch (e) {
+                alert(e.message || 'Error loading candidates');
+            }
+        }
+
+        function openCreateTender() {
+            document.getElementById('createTenderModal').classList.add('active');
+        }
+        function closeCreateTender() {
+            document.getElementById('createTenderModal').classList.remove('active');
+        }
+        async function submitCreateTender() {
+            try {
+                await apiCall('/api/tenders', 'POST', {
+                    title: document.getElementById('tTitle').value,
+                    description: document.getElementById('tDesc').value,
+                    total_budget: parseFloat(document.getElementById('tBudget').value),
+                    platform_commission: parseFloat(document.getElementById('tComm').value),
+                    deadline: document.getElementById('tDeadline').value
+                });
+                alert('Tender Created!');
+                closeCreateTender();
+                loadTenders();
+            } catch(e) {
+                alert(e.message);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('candidateModal').classList.remove('active');
+        }
+
+        function closeJustification() {
+            document.getElementById('justificationModal').classList.remove('active');
+        }
+
+        function triggerAward(artistId, rankIndex) {
+            selectedArtistId = artistId;
+            if (rankIndex > 0) {
+                // Not the top candidate, mandate justification
+                closeModal();
+                document.getElementById('justificationModal').classList.add('active');
+            } else {
+                // Top candidate, auto-justify
+                submitAward("Top ranked algorithm match");
+            }
+        }
+
+        async function submitAward(autoReason = null) {
+            const justification = autoReason || document.getElementById('justificationReason').value;
+            try {
+                await apiCall(`/api/tenders/${currentTenderId}/award`, 'POST', {
+                    artist_id: selectedArtistId,
+                    justification: justification
+                });
+                alert('Contract Awarded Successfully! Audit Log updated.');
+                closeJustification();
+                closeModal();
+                loadTenders();
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        async function generatePDF() {
+            const token = localStorage.getItem('token');
+            try {
+                const response = await fetch(`${API_BASE}/api/auditlogs/export`, {
+                    headers: { 'Authorization': token }
+                });
+                if (!response.ok) throw new Error('Failed to export PDF');
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'audit_report.pdf';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        async function loadPendingUsers() {
+            try {
+                const users = await apiCall('/api/admin/users/pending');
+                const container = document.getElementById('pendingUsersList');
+                const section = document.getElementById('pendingUsersSection');
+                container.innerHTML = '';
+                if(users.length > 0) {
+                    section.style.display = 'block';
+                    users.forEach(u => {
+                        container.innerHTML += `
+                            <div class="card tender-card" style="border-left: 4px solid var(--warning);">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <h4>${u.Name}</h4>
+                                        <p style="font-size: 0.8rem; color: var(--text-secondary);">${u.Email}</p>
+                                    </div>
+                                    <button class="btn-primary" style="width: auto; padding: 0.3rem 0.6rem; font-size: 0.8rem;" onclick="approveUser(${u.UserID})">Approve</button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                } else {
+                    section.style.display = 'none';
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function approveUser(userId) {
+            try {
+                await apiCall(`/api/admin/users/${userId}/approve`, 'POST');
+                alert('Artist Approved!');
+                loadPendingUsers();
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        async function loadPendingMilestones() {
+            try {
+                const milestones = await apiCall('/api/admin/milestones/pending');
+                const container = document.getElementById('pendingMilestonesList');
+                const section = document.getElementById('pendingMilestonesSection');
+                container.innerHTML = '';
+                if(milestones.length > 0) {
+                    section.style.display = 'block';
+                    milestones.forEach(m => {
+                        container.innerHTML += `
+                            <div class="card tender-card glass-panel" style="border-left: 4px solid var(--success);">
+                                <h4>${m.TenderTitle}</h4>
+                                <p style="font-size: 0.85rem; margin-bottom: 0.5rem;">Artist: <strong>${m.ArtistName}</strong></p>
+                                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Phase: ${m.PhaseName}</p>
+                                
+                                <div style="background: rgba(255,255,255,0.05); padding: 0.5rem; border-radius: 8px; margin-bottom: 1rem;">
+                                    <p style="font-size: 0.75rem; font-family: monospace; color: var(--success); margin-bottom: 0.5rem;">${m.GeoTagData}</p>
+                                    <img src="${m.ProofImageURL}" style="width: 100%; height: 120px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border-color);">
+                                </div>
+                                
+                                <button class="btn-primary" style="width: 100%;" onclick="approveMilestone(${m.MilestoneID})">Approve & Release Funds</button>
+                            </div>
+                        `;
+                    });
+                } else {
+                    section.style.display = 'none';
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function approveMilestone(id) {
+            try {
+                await apiCall(`/api/admin/milestones/${id}/approve`, 'POST');
+                alert('Milestone Approved! Funds released and Audit Log updated.');
+                loadPendingMilestones();
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        loadTenders();
+        loadPendingUsers();
+        loadPendingMilestones();
+    </script>
+</body>
+</html>
