@@ -46,7 +46,17 @@ def migrate_data():
         # So inserts should work.
         
         for row in rows:
-            pg_c.execute(insert_query, tuple(row))
+            cleaned_row = []
+            for col_name, item in zip(columns, row):
+                if item == "":
+                    # SQLite allowed empty strings in TIMESTAMP columns, but Postgres does not.
+                    if col_name in ['Deadline', 'CreatedAt', 'AppliedAt', 'DateUploaded', 'Timestamp']:
+                        cleaned_row.append('1970-01-01 00:00:00')
+                    else:
+                        cleaned_row.append(item)
+                else:
+                    cleaned_row.append(item)
+            pg_c.execute(insert_query, tuple(cleaned_row))
         
         # Reset the primary key sequence in PostgreSQL so new inserts don't fail
         pk_col = f"{table[:-1]}ID"
