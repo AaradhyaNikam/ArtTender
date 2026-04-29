@@ -21,6 +21,11 @@ def migrate_data():
 
     tables = ['Users', 'Portfolios', 'Tenders', 'Applications', 'Milestones', 'Performance', 'AuditLogs']
 
+    print("Clearing target database to avoid duplicate ID conflicts...")
+    for table in tables:
+        pg_c.execute(f"TRUNCATE TABLE {table} CASCADE;")
+    pg_conn.commit()
+
     for table in tables:
         print(f"Migrating table {table}...")
         sqlite_c.execute(f"SELECT * FROM {table}")
