@@ -32,7 +32,6 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 
 # Serve ALL frontend static files (css, js, html) at root level
-# This makes styles/main.css → /styles/main.css and js/api.js → /js/api.js work correctly
 app.mount("/styles", StaticFiles(directory=os.path.join(FRONTEND_DIR, "styles")), name="styles")
 app.mount("/js", StaticFiles(directory=os.path.join(FRONTEND_DIR, "js")), name="js")
 
@@ -62,7 +61,6 @@ def save_upload_file(upload_file: UploadFile) -> str:
         shutil.copyfileobj(upload_file.file, buffer)
     return f"/uploads/{filename}"
 
-# FIX 2: init_db() called after all setup, before routes that need DB
 database.init_db()
 
 def get_db():
@@ -72,7 +70,6 @@ def get_db():
     finally:
         conn.close()
 
-# FIX 3: Helper to extract role safely from token
 def get_role(authorization: str) -> str:
     """Returns role string from token like '1_Admin' or '2_Artist'"""
     try:
@@ -86,6 +83,41 @@ def get_user_id(authorization: str) -> int:
     except (IndexError, ValueError, AttributeError):
         return -1
 
+# --- POSTGRES MIGRATION HELPER ---
+# Maps PostgreSQL's automatic lowercase columns back to the PascalCase expected by the frontend
+KEY_MAP = {
+    'userid': 'UserID', 'name': 'Name', 'role': 'Role', 'email': 'Email',
+    'passwordhash': 'PasswordHash', 'contactinfo': 'ContactInfo', 'accountstatus': 'AccountStatus',
+    'portfolioid': 'PortfolioID', 'artistid': 'ArtistID', 'imageurl': 'ImageURL',
+    'artstyletags': 'ArtStyleTags', 'dateuploaded': 'DateUploaded',
+    'tenderid': 'TenderID', 'title': 'Title', 'description': 'Description',
+    'totalbudget': 'TotalBudget', 'platformcommission': 'PlatformCommission',
+    'payoutamount': 'PayoutAmount', 'deadline': 'Deadline', 'status': 'Status',
+    'assignedartistid': 'AssignedArtistID', 'adminid': 'AdminID', 'createdat': 'CreatedAt',
+    'applicationid': 'ApplicationID', 'appliedat': 'AppliedAt',
+    'milestoneid': 'MilestoneID', 'phasename': 'PhaseName', 'proofimageurl': 'ProofImageURL',
+    'geotagdata': 'GeoTagData',
+    'ratingid': 'RatingID', 'qualityscore': 'QualityScore', 'capacitytag': 'CapacityTag',
+    'logid': 'LogID', 'timestamp': 'Timestamp', 'actiontaken': 'ActionTaken',
+    'justification': 'Justification',
+    'tendertitle': 'TenderTitle', 'artistname': 'ArtistName', 'adminname': 'AdminName'
+}
+
+def format_row(row):
+    """Converts db row lowercase keys to PascalCase and handles datetime serialization."""
+    if not row:
+        return row
+    formatted = {}
+    for k, v in dict(row).items():
+        mapped_key = KEY_MAP.get(k, k)
+        # Convert datetime to string to ensure standard JSON serialization
+        if isinstance(v, datetime):
+            formatted[mapped_key] = v.isoformat()
+        else:
+            formatted[mapped_key] = v
+    return formatted
+# ---------------------------------
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -93,29 +125,29 @@ class LoginRequest(BaseModel):
 @app.post("/api/auth/login")
 def login(req: LoginRequest, db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
-    # FIX 4: Fetch PasswordHash separately, then verify with bcrypt
     c.execute("SELECT UserID, Name, Role, AccountStatus, PasswordHash FROM Users WHERE Email = %s", (req.email,))
-    user = c.fetchone()
-    if user:
-        # Check bcrypt hash; fallback to plain text for legacy seeds
+    row = c.fetchone()
+    
+    if row:
+        user = format_row(row)
         try:
-            password_valid = bcrypt.checkpw(req.password.encode('utf-8'), user['passwordhash'].encode('utf-8'))
+            password_valid = bcrypt.checkpw(req.password.encode('utf-8'), user['PasswordHash'].encode('utf-8'))
         except Exception:
-            password_valid = (req.password == user['passwordhash'])
+            password_valid = (req.password == user['PasswordHash'])
 
         if not password_valid:
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
-        if user['accountstatus'] != 'Active':
+        if user['AccountStatus'] != 'Active':
             raise HTTPException(status_code=403, detail="Account is pending or suspended.")
 
         return {
-            "token": f"{user['userid']}_{user['role']}",
+            "token": f"{user['UserID']}_{user['Role']}",
             "user": {
-                "UserID": user['userid'],
-                "Name": user['name'],
-                "Role": user['role'],
-                "AccountStatus": user['accountstatus']
+                "UserID": user['UserID'],
+                "Name": user['Name'],
+                "Role": user['Role'],
+                "AccountStatus": user['AccountStatus']
             }
         }
     raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -137,13 +169,12 @@ def signup(
 
     image_url = save_upload_file(portfolio_image)
 
-    # FIX 5: Hash password with bcrypt before storing
     hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     c.execute('''INSERT INTO Users (Name, Role, Email, PasswordHash, ContactInfo, AccountStatus)
                  VALUES (%s, %s, %s, %s, %s, %s) RETURNING UserID''',
               (name, 'Artist', email, hashed_pw, contact_info, 'Active'))
-    user_id = c.fetchone()['userid']
+    user_id = format_row(c.fetchone())['UserID']
 
     c.execute('INSERT INTO Portfolios (ArtistID, ImageURL, ArtStyleTags) VALUES (%s, %s, %s)', (user_id, image_url, art_style_tags))
     c.execute('INSERT INTO Performance (ArtistID, QualityScore, CapacityTag) VALUES (%s, %s, %s)', (user_id, 70, 'Available'))
@@ -153,12 +184,11 @@ def signup(
 
 @app.get("/api/admin/users/pending")
 def get_pending_users(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
-    # FIX 6: Proper role check using helper
     if not authorization or get_role(authorization) != 'Admin':
         raise HTTPException(status_code=403, detail="Unauthorized")
     c = db.cursor()
     c.execute("SELECT UserID, Name, Email, ContactInfo, AccountStatus FROM Users WHERE AccountStatus = 'Pending'")
-    return [dict(row) for row in c.fetchall()]
+    return [format_row(row) for row in c.fetchall()]
 
 @app.get("/api/admin/users")
 def get_all_users(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
@@ -173,7 +203,7 @@ def get_all_users(authorization: str = Header(None), db: psycopg2.extensions.con
         LEFT JOIN Portfolios port ON u.UserID = port.ArtistID
         ORDER BY u.Role, u.Name
     """)
-    return [dict(row) for row in c.fetchall()]
+    return [format_row(row) for row in c.fetchall()]
 
 @app.post("/api/admin/users/{user_id}/approve")
 def approve_user(user_id: int, authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
@@ -192,7 +222,7 @@ def approve_user(user_id: int, authorization: str = Header(None), db: psycopg2.e
 def get_tenders(db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
     c.execute("SELECT * FROM Tenders ORDER BY CreatedAt DESC")
-    return [dict(row) for row in c.fetchall()]
+    return [format_row(row) for row in c.fetchall()]
 
 class TenderCreate(BaseModel):
     title: str
@@ -213,7 +243,7 @@ def create_tender(req: TenderCreate, authorization: str = Header(None), db: psyc
     c.execute('''INSERT INTO Tenders (Title, Description, TotalBudget, PlatformCommission, PayoutAmount, Deadline, AdminID)
                  VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING TenderID''',
               (req.title, req.description, req.total_budget, req.platform_commission, payout, req.deadline, admin_id))
-    tender_id = c.fetchone()['tenderid']
+    tender_id = format_row(c.fetchone())['TenderID']
 
     c.execute('''INSERT INTO AuditLogs (AdminID, TenderID, ActionTaken, Justification)
                  VALUES (%s, %s, %s, %s)''',
@@ -221,8 +251,6 @@ def create_tender(req: TenderCreate, authorization: str = Header(None), db: psyc
     db.commit()
     return {"message": "Tender created successfully", "TenderID": tender_id}
 
-# FIX 7: Moved /api/tenders/open BEFORE /api/tenders/{tender_id}/... routes
-# so FastAPI doesn't treat "open" as a tender_id integer
 @app.get("/api/tenders/open")
 def get_open_tenders(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or get_role(authorization) != 'Artist':
@@ -238,7 +266,7 @@ def get_open_tenders(authorization: str = Header(None), db: psycopg2.extensions.
         AND t.TenderID NOT IN (SELECT TenderID FROM Applications WHERE ArtistID = %s)
         ORDER BY t.Deadline ASC
     """, (current_time, artist_id,))
-    return [dict(row) for row in c.fetchall()]
+    return [format_row(row) for row in c.fetchall()]
 
 @app.post("/api/tenders/{tender_id}/apply")
 def apply_tender(tender_id: int, authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
@@ -248,12 +276,22 @@ def apply_tender(tender_id: int, authorization: str = Header(None), db: psycopg2
 
     c = db.cursor()
     c.execute("SELECT Status, Deadline FROM Tenders WHERE TenderID = %s", (tender_id,))
-    tender = c.fetchone()
+    row = c.fetchone()
+    
+    if not row:
+        raise HTTPException(status_code=400, detail="Tender not found.")
+        
+    tender = format_row(row)
 
-    if not tender or tender['status'] != 'Open':
+    if tender['Status'] != 'Open':
         raise HTTPException(status_code=400, detail="Tender is not available.")
 
-    if tender['deadline'] < datetime.now().isoformat():
+    # Ensure deadline comparison handles psycopg2 datetime objects securely
+    tender_deadline = tender['Deadline']
+    if isinstance(tender_deadline, str):
+        tender_deadline = datetime.fromisoformat(tender_deadline)
+        
+    if tender_deadline < datetime.now():
         raise HTTPException(status_code=400, detail="Deadline has passed.")
 
     try:
@@ -269,11 +307,13 @@ def get_candidates(tender_id: int, db: psycopg2.extensions.connection = Depends(
     c = db.cursor()
 
     c.execute("SELECT Description, Deadline FROM Tenders WHERE TenderID = %s", (tender_id,))
-    tender = c.fetchone()
-    if not tender:
+    row = c.fetchone()
+    if not row:
         raise HTTPException(status_code=404, detail="Tender not found")
+        
+    tender = format_row(row)
 
-    tender_desc = tender['description'].lower() if tender['description'] else ""
+    tender_desc = tender['Description'].lower() if tender['Description'] else ""
     tender_keywords = set(re.findall(r'\b\w+\b', tender_desc))
 
     c.execute('''
@@ -284,20 +324,21 @@ def get_candidates(tender_id: int, db: psycopg2.extensions.connection = Depends(
         LEFT JOIN Portfolios port ON u.UserID = port.ArtistID
         WHERE u.Role = 'Artist' AND u.AccountStatus = 'Active' AND a.TenderID = %s
     ''', (tender_id,))
-    all_artists = [dict(row) for row in c.fetchall()]
+    
+    all_artists = [format_row(r) for r in c.fetchall()]
 
     scored_candidates = []
     for artist in all_artists:
-        tags = artist['artstyletags'] or ""
+        tags = artist['ArtStyleTags'] or ""
         artist_tags = set(re.findall(r'\b\w+\b', tags.lower()))
 
         match_count = len(tender_keywords.intersection(artist_tags))
-        ai_score = (match_count * 100) + (artist['qualityscore'] or 0)
+        ai_score = (match_count * 100) + (artist['QualityScore'] or 0)
 
-        artist['qualityscore'] = ai_score
+        artist['QualityScore'] = ai_score
         scored_candidates.append(artist)
 
-    scored_candidates.sort(key=lambda x: x['qualityscore'], reverse=True)
+    scored_candidates.sort(key=lambda x: x['QualityScore'], reverse=True)
     return scored_candidates[:5]
 
 class AwardRequest(BaseModel):
@@ -312,8 +353,12 @@ def award_tender(tender_id: int, req: AwardRequest, authorization: str = Header(
 
     c = db.cursor()
     c.execute("SELECT Status FROM Tenders WHERE TenderID = %s", (tender_id,))
-    tender = c.fetchone()
-    if not tender or tender['status'] != 'Open':
+    row = c.fetchone()
+    if not row:
+        raise HTTPException(status_code=400, detail="Tender not found")
+        
+    tender = format_row(row)
+    if tender['Status'] != 'Open':
         raise HTTPException(status_code=400, detail="Tender is not open")
 
     c.execute("UPDATE Tenders SET Status = 'Assigned', AssignedArtistID = %s WHERE TenderID = %s", (req.artist_id, tender_id))
@@ -330,7 +375,7 @@ def award_tender(tender_id: int, req: AwardRequest, authorization: str = Header(
 def get_tender_milestones(tender_id: int, db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
     c.execute("SELECT * FROM Milestones WHERE TenderID = %s", (tender_id,))
-    return [dict(row) for row in c.fetchall()]
+    return [format_row(row) for row in c.fetchall()]
 
 @app.post("/api/milestones/{milestone_id}/submit")
 def submit_milestone(
@@ -361,7 +406,7 @@ def get_audit_logs(authorization: str = Header(None), db: psycopg2.extensions.co
         raise HTTPException(status_code=403, detail="Unauthorized")
     c = db.cursor()
     c.execute("SELECT * FROM AuditLogs ORDER BY Timestamp DESC")
-    return [dict(row) for row in c.fetchall()]
+    return [format_row(row) for row in c.fetchall()]
 
 @app.get("/api/auditlogs/export")
 def export_audit_logs(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
@@ -375,7 +420,7 @@ def export_audit_logs(authorization: str = Header(None), db: psycopg2.extensions
         LEFT JOIN Users u ON a.AdminID = u.UserID
         ORDER BY a.Timestamp DESC
     """)
-    logs = [dict(row) for row in c.fetchall()]
+    logs = [format_row(row) for row in c.fetchall()]
 
     pdf = FPDF()
     pdf.add_page()
@@ -385,10 +430,10 @@ def export_audit_logs(authorization: str = Header(None), db: psycopg2.extensions
 
     pdf.set_font("helvetica", size=10)
     for log in logs:
-        text = f"[{log['timestamp']}] Admin: {log['adminname']} | Tender: {log['tenderid']} | Action: {log['actiontaken']}"
+        text = f"[{log['Timestamp']}] Admin: {log['AdminName']} | Tender: {log['TenderID']} | Action: {log['ActionTaken']}"
         pdf.cell(200, 8, txt=text, ln=1)
-        if log['justification']:
-            pdf.cell(200, 8, txt=f"    Reason: {log['justification']}", ln=1)
+        if log['Justification']:
+            pdf.cell(200, 8, txt=f"    Reason: {log['Justification']}", ln=1)
 
     filepath = os.path.join(UPLOAD_DIR, "audit_report.pdf")
     pdf.output(filepath)
@@ -407,7 +452,7 @@ def get_pending_milestones(authorization: str = Header(None), db: psycopg2.exten
         JOIN Users u ON t.AssignedArtistID = u.UserID
         WHERE m.Status = 'Submitted'
     """)
-    return [dict(row) for row in c.fetchall()]
+    return [format_row(row) for row in c.fetchall()]
 
 @app.post("/api/admin/milestones/{milestone_id}/approve")
 def approve_milestone(milestone_id: int, authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
@@ -420,11 +465,11 @@ def approve_milestone(milestone_id: int, authorization: str = Header(None), db: 
         raise HTTPException(status_code=404, detail="Milestone not found")
 
     c.execute("SELECT TenderID, PhaseName FROM Milestones WHERE MilestoneID = %s", (milestone_id,))
-    m = c.fetchone()
+    m = format_row(c.fetchone())
 
     c.execute('''INSERT INTO AuditLogs (AdminID, TenderID, ActionTaken, Justification)
                  VALUES (%s, %s, %s, %s)''',
-              (admin_id, m['tenderid'], 'APPROVED_MILESTONE', f"Verified Proof of Work for {m['phasename']}"))
+              (admin_id, m['TenderID'], 'APPROVED_MILESTONE', f"Verified Proof of Work for {m['PhaseName']}"))
     db.commit()
     return {"message": "Milestone approved"}
 
@@ -432,7 +477,7 @@ def approve_milestone(milestone_id: int, authorization: str = Header(None), db: 
 def get_artist_tenders(artist_id: int, db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
     c.execute("SELECT * FROM Tenders WHERE AssignedArtistID = %s", (artist_id,))
-    return [dict(row) for row in c.fetchall()]
+    return [format_row(row) for row in c.fetchall()]
 
 if __name__ == "__main__":
     import uvicorn
