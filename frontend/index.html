@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Artiverse - Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles/main.css?v=2">
+</head>
+<body class="login-body">
+    <div class="glass-panel login-card">
+        <div class="logo-container">
+            <h1>Art<span class="highlight">iverse</span></h1>
+            <p>Transparent Vendor Management</p>
+        </div>
+        
+        <form id="loginForm">
+            <div class="input-group">
+                <label>Email Address</label>
+                <input type="email" id="email" required placeholder="admin@artiverse.com">
+            </div>
+            <div class="input-group">
+                <label>Password</label>
+                <input type="password" id="password" required placeholder="••••••••">
+            </div>
+            
+            <button type="submit" class="btn-primary">Sign In</button>
+        </form>
+        
+        <div style="text-align: center; margin-top: 1rem;">
+            <a href="signup.html" style="color: var(--accent); text-decoration: none; font-size: 0.9rem; font-weight: 600;">Register as an Artist</a>
+        </div>
+        
+        <div class="login-hints">
+            <p><small>Admin: admin@artiverse.com / admin123</small></p>
+            <p><small>Artist: jane@artist.com / artist123</small></p>
+        </div>
+    </div>
+
+    <script src="js/api.js?v=3"></script>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const res = await apiCall('/api/auth/login', 'POST', { email, password });
+                localStorage.setItem('token', res.token);
+                localStorage.setItem('user', JSON.stringify(res.user));
+                
+                if(res.user.Role === 'Admin') {
+                    window.location.href = 'admin.html';
+                } else {
+                    window.location.href = 'artist.html';
+                }
+            } catch (err) {
+                alert(err.message || 'Login failed');
+            }
+        });
+    </script>
+</body>
+</html>

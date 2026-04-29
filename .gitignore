@@ -1,0 +1,29 @@
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# Database
+*.db
+arttender.db
+backend/arttender.db
+
+# User Uploads
+backend/uploads/
+
+# Environment Variables / API Keys
+.env
+.env.local
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Dummy Credentials
+credentials.txt
