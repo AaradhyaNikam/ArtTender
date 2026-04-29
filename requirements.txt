@@ -1,7 +1,1 @@
-fastapi
-uvicorn
-gunicorn
-pydantic
-fpdf
-python-multipart
-psycopg2-binary
+ÿþ
