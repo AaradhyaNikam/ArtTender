@@ -30,13 +30,28 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
-app.mount("/frontend", StaticFiles(directory=FRONTEND_DIR), name="frontend")
 
-# FIX 1: Serve frontend index.html at root "/"
+# Serve ALL frontend static files (css, js, html) at root level
+# This makes styles/main.css → /styles/main.css and js/api.js → /js/api.js work correctly
+app.mount("/styles", StaticFiles(directory=os.path.join(FRONTEND_DIR, "styles")), name="styles")
+app.mount("/js", StaticFiles(directory=os.path.join(FRONTEND_DIR, "js")), name="js")
+
+# Serve individual HTML pages
 @app.get("/")
 def serve_index():
-    index_path = os.path.join(FRONTEND_DIR, "index.html")
-    return FileResponse(index_path)
+    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+
+@app.get("/admin.html")
+def serve_admin():
+    return FileResponse(os.path.join(FRONTEND_DIR, "admin.html"))
+
+@app.get("/artist.html")
+def serve_artist():
+    return FileResponse(os.path.join(FRONTEND_DIR, "artist.html"))
+
+@app.get("/signup.html")
+def serve_signup():
+    return FileResponse(os.path.join(FRONTEND_DIR, "signup.html"))
 
 def save_upload_file(upload_file: UploadFile) -> str:
     if not upload_file:
