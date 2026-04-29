@@ -221,7 +221,8 @@ def approve_user(user_id: int, authorization: str = Header(None), db: psycopg2.e
 @app.get("/api/tenders")
 def get_tenders(db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
-    c.execute("SELECT * FROM Tenders ORDER BY CreatedAt DESC")
+    # Filter out corrupted dates that cause Python's datetime to overflow
+    c.execute("SELECT * FROM Tenders WHERE EXTRACT(YEAR FROM Deadline) < 9999 ORDER BY CreatedAt DESC")
     return [format_row(row) for row in c.fetchall()]
 
 class TenderCreate(BaseModel):
