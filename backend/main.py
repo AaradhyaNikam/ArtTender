@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
-import database
+from backend import database
 import psycopg2
 import psycopg2.extensions
 import os
