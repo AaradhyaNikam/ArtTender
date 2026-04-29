@@ -9,8 +9,8 @@ __pycache__/
 
 # Database
 *.db
-arttender.db
-backend/arttender.db
+# arttender.db
+# backend/arttender.db
 
 # User Uploads
 backend/uploads/

@@ -1,17 +1,12 @@
-import sqlite3
+import psycopg2
 import os
 from datetime import datetime, timedelta
 
-db_path = os.path.join(os.path.dirname(__file__), 'arttender.db')
-
 def seed():
-    if os.path.exists(db_path):
-        os.remove(db_path)
-        
     import database
     database.init_db()
     
-    conn = sqlite3.connect(db_path)
+    conn = psycopg2.connect(database.DATABASE_URL)
     c = conn.cursor()
     
     c.execute("DELETE FROM Users WHERE Role = 'Artist'")
@@ -35,26 +30,26 @@ def seed():
     for name, tags, score in artists:
         email = f"{name.split()[0].lower()}@artist.com"
         c.execute('''INSERT INTO Users (Name, Role, Email, PasswordHash, AccountStatus) 
-                     VALUES (?, ?, ?, ?, ?)''',
+                     VALUES (%s, %s, %s, %s, %s) RETURNING UserID''',
                   (name, 'Artist', email, 'artist123', 'Active'))
-        aid = c.lastrowid
+        aid = c.fetchone()[0]
         artist_ids.append(aid)
         
-        c.execute('INSERT INTO Performance (ArtistID, QualityScore, CapacityTag) VALUES (?, ?, ?)', (aid, score, 'Available'))
-        c.execute('INSERT INTO Portfolios (ArtistID, ImageURL, ArtStyleTags) VALUES (?, ?, ?)', (aid, '/uploads/dummy.jpg', tags))
+        c.execute('INSERT INTO Performance (ArtistID, QualityScore, CapacityTag) VALUES (%s, %s, %s)', (aid, score, 'Available'))
+        c.execute('INSERT INTO Portfolios (ArtistID, ImageURL, ArtStyleTags) VALUES (%s, %s, %s)', (aid, '/uploads/dummy.jpg', tags))
 
     past_deadline = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
     
     c.execute('''INSERT INTO Tenders (Title, Description, TotalBudget, PlatformCommission, PayoutAmount, Deadline, AdminID)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                 VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING TenderID''',
               ("City Park Metallic Centerpiece", "Looking for a large scale modern metal sculpture for the new park.", 
                50000, 10, 45000, past_deadline, 1))
-    tender_id = c.lastrowid
+    tender_id = c.fetchone()[0]
     
     applicants = artist_ids[:8]
     
     for aid in applicants:
-        c.execute("INSERT INTO Applications (TenderID, ArtistID) VALUES (?, ?)", (tender_id, aid))
+        c.execute("INSERT INTO Applications (TenderID, ArtistID) VALUES (%s, %s)", (tender_id, aid))
         
     conn.commit()
     conn.close()

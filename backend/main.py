@@ -5,7 +5,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
 import database
-import sqlite3
+import psycopg2
+import psycopg2.extensions
 import os
 import shutil
 import uuid
@@ -53,9 +54,9 @@ class LoginRequest(BaseModel):
     password: str
 
 @app.post("/api/auth/login")
-def login(req: LoginRequest, db: sqlite3.Connection = Depends(get_db)):
+def login(req: LoginRequest, db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
-    c.execute("SELECT UserID, Name, Role, AccountStatus FROM Users WHERE Email = ? AND PasswordHash = ?", (req.email, req.password))
+    c.execute("SELECT UserID, Name, Role, AccountStatus FROM Users WHERE Email = %s AND PasswordHash = %s", (req.email, req.password))
     user = c.fetchone()
     if user:
         if user['AccountStatus'] != 'Active':
@@ -71,28 +72,28 @@ def signup(
     contact_info: str = Form(None),
     art_style_tags: str = Form(None),
     portfolio_image: UploadFile = File(...),
-    db: sqlite3.Connection = Depends(get_db)
+    db: psycopg2.extensions.connection = Depends(get_db)
 ):
     c = db.cursor()
-    c.execute("SELECT UserID FROM Users WHERE Email = ?", (email,))
+    c.execute("SELECT UserID FROM Users WHERE Email = %s", (email,))
     if c.fetchone():
         raise HTTPException(status_code=400, detail="Email already registered")
         
     image_url = save_upload_file(portfolio_image)
     
     c.execute('''INSERT INTO Users (Name, Role, Email, PasswordHash, ContactInfo, AccountStatus) 
-                 VALUES (?, ?, ?, ?, ?, ?)''',
+                 VALUES (%s, %s, %s, %s, %s, %s) RETURNING UserID''',
               (name, 'Artist', email, password, contact_info, 'Active'))
-    user_id = c.lastrowid
+    user_id = c.fetchone()['userid']
     
-    c.execute('INSERT INTO Portfolios (ArtistID, ImageURL, ArtStyleTags) VALUES (?, ?, ?)', (user_id, image_url, art_style_tags))
-    c.execute('INSERT INTO Performance (ArtistID, QualityScore, CapacityTag) VALUES (?, ?, ?)', (user_id, 70, 'Available'))
+    c.execute('INSERT INTO Portfolios (ArtistID, ImageURL, ArtStyleTags) VALUES (%s, %s, %s)', (user_id, image_url, art_style_tags))
+    c.execute('INSERT INTO Performance (ArtistID, QualityScore, CapacityTag) VALUES (%s, %s, %s)', (user_id, 70, 'Available'))
     
     db.commit()
     return {"message": "Signup successful. Your account is active."}
 
 @app.get("/api/admin/users/pending")
-def get_pending_users(authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def get_pending_users(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Admin' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     c = db.cursor()
@@ -100,7 +101,7 @@ def get_pending_users(authorization: str = Header(None), db: sqlite3.Connection 
     return [dict(row) for row in c.fetchall()]
 
 @app.get("/api/admin/users")
-def get_all_users(authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def get_all_users(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Admin' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     c = db.cursor()
@@ -115,12 +116,12 @@ def get_all_users(authorization: str = Header(None), db: sqlite3.Connection = De
     return [dict(row) for row in c.fetchall()]
 
 @app.post("/api/admin/users/{user_id}/approve")
-def approve_user(user_id: int, authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def approve_user(user_id: int, authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Admin' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     c = db.cursor()
-    c.execute("UPDATE Users SET AccountStatus = 'Active' WHERE UserID = ?", (user_id,))
+    c.execute("UPDATE Users SET AccountStatus = 'Active' WHERE UserID = %s", (user_id,))
     if c.rowcount == 0:
         raise HTTPException(status_code=404, detail="User not found")
         
@@ -128,7 +129,7 @@ def approve_user(user_id: int, authorization: str = Header(None), db: sqlite3.Co
     return {"message": "User approved"}
 
 @app.get("/api/tenders")
-def get_tenders(db: sqlite3.Connection = Depends(get_db)):
+def get_tenders(db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
     c.execute("SELECT * FROM Tenders ORDER BY CreatedAt DESC")
     return [dict(row) for row in c.fetchall()]
@@ -141,7 +142,7 @@ class TenderCreate(BaseModel):
     deadline: str
 
 @app.post("/api/tenders")
-def create_tender(req: TenderCreate, authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def create_tender(req: TenderCreate, authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Admin' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     admin_id = int(authorization.split('_')[0])
@@ -150,18 +151,18 @@ def create_tender(req: TenderCreate, authorization: str = Header(None), db: sqli
     
     c = db.cursor()
     c.execute('''INSERT INTO Tenders (Title, Description, TotalBudget, PlatformCommission, PayoutAmount, Deadline, AdminID)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                 VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING TenderID''',
               (req.title, req.description, req.total_budget, req.platform_commission, payout, req.deadline, admin_id))
-    tender_id = c.lastrowid
+    tender_id = c.fetchone()['tenderid']
     
     c.execute('''INSERT INTO AuditLogs (AdminID, TenderID, ActionTaken, Justification)
-                 VALUES (?, ?, ?, ?)''',
+                 VALUES (%s, %s, %s, %s)''',
               (admin_id, tender_id, 'CREATED_TENDER', 'New tender created'))
     db.commit()
     return {"message": "Tender created successfully", "TenderID": tender_id}
 
 @app.get("/api/tenders/open")
-def get_open_tenders(authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def get_open_tenders(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Artist' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     artist_id = int(authorization.split('_')[0])
@@ -172,20 +173,20 @@ def get_open_tenders(authorization: str = Header(None), db: sqlite3.Connection =
     c.execute("""
         SELECT t.* FROM Tenders t
         WHERE t.Status = 'Open' 
-        AND t.Deadline > ?
-        AND t.TenderID NOT IN (SELECT TenderID FROM Applications WHERE ArtistID = ?)
+        AND t.Deadline > %s
+        AND t.TenderID NOT IN (SELECT TenderID FROM Applications WHERE ArtistID = %s)
         ORDER BY t.Deadline ASC
     """, (current_time, artist_id,))
     return [dict(row) for row in c.fetchall()]
 
 @app.post("/api/tenders/{tender_id}/apply")
-def apply_tender(tender_id: int, authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def apply_tender(tender_id: int, authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Artist' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     artist_id = int(authorization.split('_')[0])
     
     c = db.cursor()
-    c.execute("SELECT Status, Deadline FROM Tenders WHERE TenderID = ?", (tender_id,))
+    c.execute("SELECT Status, Deadline FROM Tenders WHERE TenderID = %s", (tender_id,))
     tender = c.fetchone()
     
     if not tender or tender['Status'] != 'Open':
@@ -196,18 +197,18 @@ def apply_tender(tender_id: int, authorization: str = Header(None), db: sqlite3.
         raise HTTPException(status_code=400, detail="Deadline has passed.")
         
     try:
-        c.execute("INSERT INTO Applications (TenderID, ArtistID) VALUES (?, ?)", (tender_id, artist_id))
+        c.execute("INSERT INTO Applications (TenderID, ArtistID) VALUES (%s, %s)", (tender_id, artist_id))
         db.commit()
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
         raise HTTPException(status_code=400, detail="Already applied.")
         
     return {"message": "Successfully applied for the tender."}
 
 @app.get("/api/tenders/{tender_id}/candidates")
-def get_candidates(tender_id: int, db: sqlite3.Connection = Depends(get_db)):
+def get_candidates(tender_id: int, db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
     
-    c.execute("SELECT Description, Deadline FROM Tenders WHERE TenderID = ?", (tender_id,))
+    c.execute("SELECT Description, Deadline FROM Tenders WHERE TenderID = %s", (tender_id,))
     tender = c.fetchone()
     if not tender:
         raise HTTPException(status_code=404, detail="Tender not found")
@@ -222,7 +223,7 @@ def get_candidates(tender_id: int, db: sqlite3.Connection = Depends(get_db)):
         JOIN Applications a ON u.UserID = a.ArtistID
         LEFT JOIN Performance p ON u.UserID = p.ArtistID
         LEFT JOIN Portfolios port ON u.UserID = port.ArtistID
-        WHERE u.Role = 'Artist' AND u.AccountStatus = 'Active' AND a.TenderID = ?
+        WHERE u.Role = 'Artist' AND u.AccountStatus = 'Active' AND a.TenderID = %s
     ''', (tender_id,))
     all_artists = [dict(row) for row in c.fetchall()]
     
@@ -245,31 +246,31 @@ class AwardRequest(BaseModel):
     justification: str
 
 @app.post("/api/tenders/{tender_id}/award")
-def award_tender(tender_id: int, req: AwardRequest, authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def award_tender(tender_id: int, req: AwardRequest, authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Admin' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     admin_id = int(authorization.split('_')[0])
     
     c = db.cursor()
-    c.execute("SELECT Status FROM Tenders WHERE TenderID = ?", (tender_id,))
+    c.execute("SELECT Status FROM Tenders WHERE TenderID = %s", (tender_id,))
     tender = c.fetchone()
     if not tender or tender['Status'] != 'Open':
         raise HTTPException(status_code=400, detail="Tender is not open")
         
-    c.execute("UPDATE Tenders SET Status = 'Assigned', AssignedArtistID = ? WHERE TenderID = ?", (req.artist_id, tender_id))
+    c.execute("UPDATE Tenders SET Status = 'Assigned', AssignedArtistID = %s WHERE TenderID = %s", (req.artist_id, tender_id))
     
     c.execute('''INSERT INTO AuditLogs (AdminID, TenderID, ActionTaken, Justification)
-                 VALUES (?, ?, ?, ?)''',
+                 VALUES (%s, %s, %s, %s)''',
               (admin_id, tender_id, 'AWARDED_CONTRACT', req.justification))
               
-    c.execute('''INSERT INTO Milestones (TenderID, PhaseName) VALUES (?, ?)''', (tender_id, '25% Upfront Verification'))
+    c.execute('''INSERT INTO Milestones (TenderID, PhaseName) VALUES (%s, %s)''', (tender_id, '25% Upfront Verification'))
     db.commit()
     return {"message": "Contract awarded successfully"}
 
 @app.get("/api/tenders/{tender_id}/milestones")
-def get_tender_milestones(tender_id: int, db: sqlite3.Connection = Depends(get_db)):
+def get_tender_milestones(tender_id: int, db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
-    c.execute("SELECT * FROM Milestones WHERE TenderID = ?", (tender_id,))
+    c.execute("SELECT * FROM Milestones WHERE TenderID = %s", (tender_id,))
     return [dict(row) for row in c.fetchall()]
 
 @app.post("/api/milestones/{milestone_id}/submit")
@@ -278,7 +279,7 @@ def submit_milestone(
     geo_tag_data: str = Form(...),
     proof_image: UploadFile = File(...),
     authorization: str = Header(None),
-    db: sqlite3.Connection = Depends(get_db)
+    db: psycopg2.extensions.connection = Depends(get_db)
 ):
     if not authorization or 'Artist' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
@@ -286,7 +287,7 @@ def submit_milestone(
     image_url = save_upload_file(proof_image)
     
     c = db.cursor()
-    c.execute("UPDATE Milestones SET Status = 'Submitted', ProofImageURL = ?, GeoTagData = ? WHERE MilestoneID = ?", 
+    c.execute("UPDATE Milestones SET Status = 'Submitted', ProofImageURL = %s, GeoTagData = %s WHERE MilestoneID = %s", 
               (image_url, geo_tag_data, milestone_id))
               
     if c.rowcount == 0:
@@ -296,7 +297,7 @@ def submit_milestone(
     return {"message": "Milestone submitted successfully"}
 
 @app.get("/api/auditlogs")
-def get_audit_logs(authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def get_audit_logs(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Admin' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     c = db.cursor()
@@ -304,7 +305,7 @@ def get_audit_logs(authorization: str = Header(None), db: sqlite3.Connection = D
     return [dict(row) for row in c.fetchall()]
 
 @app.get("/api/auditlogs/export")
-def export_audit_logs(authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def export_audit_logs(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Admin' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
         
@@ -336,7 +337,7 @@ def export_audit_logs(authorization: str = Header(None), db: sqlite3.Connection 
     return FileResponse(filepath, media_type="application/pdf", filename="audit_report.pdf")
 
 @app.get("/api/admin/milestones/pending")
-def get_pending_milestones(authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def get_pending_milestones(authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Admin' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     c = db.cursor()
@@ -350,28 +351,28 @@ def get_pending_milestones(authorization: str = Header(None), db: sqlite3.Connec
     return [dict(row) for row in c.fetchall()]
 
 @app.post("/api/admin/milestones/{milestone_id}/approve")
-def approve_milestone(milestone_id: int, authorization: str = Header(None), db: sqlite3.Connection = Depends(get_db)):
+def approve_milestone(milestone_id: int, authorization: str = Header(None), db: psycopg2.extensions.connection = Depends(get_db)):
     if not authorization or 'Admin' not in authorization:
         raise HTTPException(status_code=403, detail="Unauthorized")
     admin_id = int(authorization.split('_')[0])
     c = db.cursor()
-    c.execute("UPDATE Milestones SET Status = 'Approved' WHERE MilestoneID = ?", (milestone_id,))
+    c.execute("UPDATE Milestones SET Status = 'Approved' WHERE MilestoneID = %s", (milestone_id,))
     if c.rowcount == 0:
         raise HTTPException(status_code=404, detail="Milestone not found")
         
-    c.execute("SELECT TenderID, PhaseName FROM Milestones WHERE MilestoneID = ?", (milestone_id,))
+    c.execute("SELECT TenderID, PhaseName FROM Milestones WHERE MilestoneID = %s", (milestone_id,))
     m = c.fetchone()
     
     c.execute('''INSERT INTO AuditLogs (AdminID, TenderID, ActionTaken, Justification)
-                 VALUES (?, ?, ?, ?)''',
+                 VALUES (%s, %s, %s, %s)''',
               (admin_id, m['TenderID'], 'APPROVED_MILESTONE', f"Verified Proof of Work for {m['PhaseName']}"))
     db.commit()
     return {"message": "Milestone approved"}
 
 @app.get("/api/artist/{artist_id}/tenders")
-def get_artist_tenders(artist_id: int, db: sqlite3.Connection = Depends(get_db)):
+def get_artist_tenders(artist_id: int, db: psycopg2.extensions.connection = Depends(get_db)):
     c = db.cursor()
-    c.execute("SELECT * FROM Tenders WHERE AssignedArtistID = ?", (artist_id,))
+    c.execute("SELECT * FROM Tenders WHERE AssignedArtistID = %s", (artist_id,))
     return [dict(row) for row in c.fetchall()]
 
 if __name__ == "__main__":
